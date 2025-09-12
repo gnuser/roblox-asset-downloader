@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+runtime/assets/*
+runtime/roblox_cookie.txt
+.env
