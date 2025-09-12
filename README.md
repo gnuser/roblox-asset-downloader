@@ -59,20 +59,24 @@ runtime/roblox_cookie.txt
 ### download individual or multiple assets with automatic template overlay
 
 ```python
-from module.roblox import AsyncRobloxDownloader
 import asyncio
+from module.roblox import AsyncRobloxDownloader
 
-# optional template.png will be applied to every asset
-downloader = AsyncRobloxDownloader(template="template.png", max_concurrent=10)
+# template dir and runtime dir are different, i'm just using the same folder for simplicity
+downloader = AsyncRobloxDownloader(template="./runtime/template.png", runtime_dir="./runtime/", max_concurrent=10)
 
 async def main():
-    # single asset
-    await downloader.download_assets("11946489838")
+    # download single or multiple assets
+    await downloader.download_assets("9924398681")
+    await downloader.download_assets(["9884494638", "9884500531"])
 
-    # multiple assets
-    await downloader.download_assets(["11946489838", "119464898452"])
+    # download group items (default 10, or specify limit)
+    await downloader.download_group_items(9137704)
+    await downloader.download_group_items(9137704, limit=20)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
+
 ```
 
 ### download all items from a group store
