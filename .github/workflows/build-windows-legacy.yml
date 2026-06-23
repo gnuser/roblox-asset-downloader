@@ -1,0 +1,38 @@
+name: Build Windows legacy client
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-legacy:
+    name: Build Windows legacy x64
+    runs-on: windows-2019
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.8.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8.10"
+
+      - name: Install legacy dependencies
+        run: |
+          python -m pip install --upgrade "pip<25"
+          pip install -r requirements-legacy.txt
+
+      - name: Build client
+        run: python build_client.py
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts
+          Compress-Archive -Path dist\* -DestinationPath artifacts\RobloxAssetDownloader-windows-legacy-X64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RobloxAssetDownloader-Windows-Legacy-X64
+          path: artifacts/*
