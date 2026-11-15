@@ -136,7 +136,10 @@ class AsyncRobloxDownloader:
         runtime_dir="./runtime/",
         apply_template_to_images=True,
         cookie=None,
+        place_id=None,
+        load_cookie_file=True,
     ):
+        self.place_id = self.normalize_place_id(place_id)
         self.runtime_dir = runtime_dir
         os.makedirs(self.runtime_dir, exist_ok=True)
         logger.debug("Using runtime directory: %s", self.runtime_dir)
@@ -153,12 +156,21 @@ class AsyncRobloxDownloader:
 
         self.cookie = cookie
         cookie_path = os.path.join(self.runtime_dir, "roblox_cookie.txt")
-        if not self.cookie:
+        if not self.cookie and load_cookie_file:
             try:
                 with open(cookie_path, "r", encoding="utf-8") as f:
                     self.cookie = f.read().strip()
             except FileNotFoundError:
                 logger.debug("No cookie file found at %s", cookie_path)
+
+    @staticmethod
+    def normalize_place_id(place_id):
+        if place_id is None or not str(place_id).strip():
+            return None
+        value = str(place_id).strip()
+        if not re.fullmatch(r"[0-9]+", value) or not value.strip("0"):
+            raise ValueError("Place ID must be a positive number, or left empty.")
+        return value.lstrip("0")
 
     async def _create_session(self):
         headers = {
@@ -181,13 +193,15 @@ class AsyncRobloxDownloader:
         )
         return session
 
-    async def _get_with_retries(self, session, url, params=None, attempts=3):
+    async def _get_with_retries(
+        self, session, url, params=None, attempts=3, headers=None
+    ):
         last_error = None
 
         for attempt in range(1, attempts + 1):
             try:
                 async with self.semaphore:
-                    async with session.get(url, params=params) as response:
+                    async with session.get(url, params=params, headers=headers) as response:
                         content = await response.read()
                         content_type = response.headers.get("Content-Type", "")
                         content_type = content_type.split(";", 1)[0].strip().lower()
@@ -283,9 +297,12 @@ class AsyncRobloxDownloader:
     async def _fetch_asset_content(self, session, asset_id):
         asset_id = self._normalize_asset_id(asset_id)
         url = f"https://assetdelivery.roblox.com/v1/asset/?id={asset_id}"
+        headers = {"User-Agent": "Roblox/WinInet"}
+        if self.place_id:
+            headers["Roblox-Place-Id"] = self.place_id
 
         try:
-            response = await self._get_with_retries(session, url)
+            response = await self._get_with_retries(session, url, headers=headers)
 
             if response["status"] != 200:
                 body = response["content"][:300].decode("utf-8", errors="replace")
@@ -295,6 +312,18 @@ class AsyncRobloxDownloader:
                     response["status"],
                     body,
                 )
+                if response["status"] == 401:
+                    logger.warning(
+                        "Asset %s requires authentication. Check your Roblox cookie.",
+                        asset_id,
+                    )
+                elif response["status"] == 403:
+                    logger.warning(
+                        "Access denied for asset %s. Check that your account and "
+                        "the selected Place ID (%s) have access to this asset.",
+                        asset_id,
+                        self.place_id or "not set",
+                    )
                 return None
 
             return {
@@ -330,6 +359,10 @@ class AsyncRobloxDownloader:
         return asset_type_name in LINKED_IMAGE_ASSET_TYPES
 
     def _guess_extension(self, content, content_type, asset_type_name):
+        # Binary Roblox files share the <roblox prefix with XML documents.
+        if content.startswith(b"<roblox!"):
+            return ".rbxl" if asset_type_name == "Place" else ".rbxm"
+
         magic_extension = self._extension_from_magic(content)
         if magic_extension:
             return magic_extension
@@ -338,7 +371,10 @@ class AsyncRobloxDownloader:
         if stripped.startswith(b"<roblox") or stripped.startswith(b"<?xml"):
             if asset_type_name == "Place":
                 return ".rbxlx"
-            if asset_type_name in {"Model", "Plugin", "Package", "Animation"}:
+            if (
+                asset_type_name in {"Model", "Plugin", "Package"}
+                or asset_type_name.endswith("Animation")
+            ):
                 return ".rbxmx"
             return ".xml"
 

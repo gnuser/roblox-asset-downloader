@@ -11,6 +11,7 @@ from tkinter import IntVar, StringVar, Tk, filedialog, messagebox
 from tkinter import ttk
 
 from module.roblox import AsyncRobloxDownloader
+from module.cookie_store import CookieStore, CookieStoreError
 
 
 APP_NAME = "Roblox Asset Downloader"
@@ -26,22 +27,27 @@ class QueueLogHandler(logging.Handler):
 
 
 class DownloaderClient:
-    def __init__(self, root):
+    def __init__(self, root, cookie_store=None):
         self.root = root
+        self.cookie_store = cookie_store if cookie_store is not None else CookieStore()
+        self._cookie_load_failed = False
         self.root.title(APP_NAME)
-        self.root.geometry("860x620")
-        self.root.minsize(760, 540)
+        self.root.geometry("860x700")
+        self.root.minsize(760, 620)
 
         self.event_queue = queue.Queue()
         self.worker = None
 
         self.runtime_dir = StringVar(value=str(Path.home() / "RobloxAssetDownloader"))
         self.cookie = StringVar(value="")
+        self.place_id = StringVar(value="")
         self.group_id = StringVar(value="")
         self.group_limit = IntVar(value=20)
         self.status = StringVar(value="Ready")
 
         self._build_ui()
+        self._load_saved_cookie()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(100, self._poll_events)
 
     def _build_ui(self):
@@ -118,11 +124,27 @@ class DownloaderClient:
         ttk.Entry(settings, textvariable=self.cookie, show="*").grid(
             row=1,
             column=1,
-            columnspan=2,
             sticky="ew",
-            padx=(10, 0),
+            padx=(10, 8),
             pady=(10, 0),
         )
+        cookie_actions = ttk.Frame(settings)
+        cookie_actions.grid(row=1, column=2, sticky="ew", pady=(10, 0))
+        ttk.Button(cookie_actions, text="Save", command=self._save_cookie).pack(side="left")
+        ttk.Button(cookie_actions, text="Clear", command=self._clear_saved_cookie).pack(
+            side="left", padx=(6, 0)
+        )
+
+        ttk.Label(settings, text="Place ID (optional)").grid(
+            row=2, column=0, sticky="w", pady=(10, 0)
+        )
+        ttk.Entry(settings, textvariable=self.place_id).grid(
+            row=2, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0)
+        )
+        ttk.Label(
+            settings,
+            text="Use the ID of a place that has permission to use the asset.",
+        ).grid(row=3, column=1, columnspan=2, sticky="w", padx=(10, 0), pady=(4, 0))
 
         actions = ttk.Frame(main)
         actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
@@ -152,6 +174,43 @@ class DownloaderClient:
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
+    def _load_saved_cookie(self):
+        try:
+            self.cookie.set(self.cookie_store.load())
+            if self.cookie.get():
+                self._append_log("Saved cookie loaded.")
+        except CookieStoreError as exc:
+            self._cookie_load_failed = True
+            self._append_log(str(exc))
+
+    def _save_cookie(self, show_feedback=True):
+        cookie = self.cookie.get().strip()
+        if self._cookie_load_failed and not cookie and not show_feedback:
+            return False
+        try:
+            self.cookie_store.save(cookie)
+        except CookieStoreError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+            return False
+        self._cookie_load_failed = False
+        if show_feedback:
+            self._append_log("Cookie saved for next launch." if cookie else "Saved cookie cleared.")
+        return True
+
+    def _clear_saved_cookie(self):
+        try:
+            self.cookie_store.clear()
+        except CookieStoreError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+            return
+        self.cookie.set("")
+        self._cookie_load_failed = False
+        self._append_log("Saved cookie cleared.")
+
+    def _on_close(self):
+        self._save_cookie(show_feedback=False)
+        self.root.destroy()
+
     def _choose_output_dir(self):
         selected = filedialog.askdirectory(initialdir=self.runtime_dir.get() or str(Path.home()))
         if selected:
@@ -178,6 +237,7 @@ class DownloaderClient:
             messagebox.showerror(APP_NAME, str(e))
             return
 
+        self._save_cookie(show_feedback=False)
         self._clear_log()
         self.status.set("Downloading...")
         self.start_button.configure(state="disabled")
@@ -198,6 +258,7 @@ class DownloaderClient:
         config = {
             "runtime_dir": runtime_dir,
             "cookie": self.cookie.get().strip() or None,
+            "place_id": AsyncRobloxDownloader.normalize_place_id(self.place_id.get()),
             "mode": self._current_mode(),
         }
 
@@ -248,6 +309,8 @@ class DownloaderClient:
             max_concurrent=8,
             apply_template_to_images=False,
             cookie=config["cookie"],
+            place_id=config["place_id"],
+            load_cookie_file=False,
         )
 
         if config["mode"] == "assets":
@@ -267,6 +330,14 @@ class DownloaderClient:
                     self._append_log(payload)
                 elif kind == "done":
                     self.start_button.configure(state="normal")
+                    if not payload:
+                        self.status.set("No files downloaded")
+                        self._append_log("No files were saved. Check the log for details.")
+                        messagebox.showwarning(
+                            APP_NAME,
+                            "No files were downloaded. Check the log for details.",
+                        )
+                        continue
                     self.status.set(f"Saved {len(payload)} file(s)")
                     self._append_log("")
                     self._append_log(f"Done. Saved {len(payload)} file(s).")

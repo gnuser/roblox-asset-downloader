@@ -42,5 +42,12 @@ The `Build Windows legacy client` GitHub Actions workflow produces
 
 ## Cookie safety
 
-The client lets users paste a `.ROBLOSECURITY` cookie for the current session.
-The GUI passes it directly to the downloader and does not save it to disk.
+The client remembers the `.ROBLOSECURITY` cookie between launches. It saves when
+the user clicks Save, starts a download, or closes the window normally. Clear
+removes the saved value and empties the field.
+
+Windows uses current-user DPAPI encryption and stores the result under
+`%LOCALAPPDATA%/RobloxAssetDownloader/cookie.dat`; this uses the Python standard
+library and does not need another package. macOS/Linux use a file with owner-only
+permissions in the user's application configuration directory. Cookie values are
+masked in the UI and are not logged or included in the executable.

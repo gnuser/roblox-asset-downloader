@@ -21,6 +21,8 @@ template image exists, it can be composited onto downloaded images.
 * Optional image template overlay
 * Async and concurrent downloads powered by `aiohttp`
 * Authenticated requests through a local Roblox cookie file when required
+* Optional Place ID for asset requests that need an experience context
+* Binary Roblox animations/models saved as `.rbxm`, and binary places as `.rbxl`
 
 ---
 
@@ -77,7 +79,35 @@ python client.py
 ```
 
 The desktop client keeps the common workflow simple: asset IDs, group ID, output
-folder, cookie, download button, and log output.
+folder, cookie, optional Place ID, download button, and log output.
+
+For an animation, enter its asset ID and, when needed, a Roblox cookie and the
+numeric **Place ID** of a place permitted to use the animation. Leave Place ID
+empty when no place context is needed. This is the place ID, not a universe or
+group ID. Files are saved under `assets/` inside the selected output folder.
+
+Asset Delivery requests use `User-Agent: Roblox/WinInet` and include
+`Roblox-Place-Id` when supplied. Metadata and catalog requests do not include
+this place header. A Place ID does not grant access by itself: Roblox must still
+authorize the request. HTTP 401/403 responses are logged and are not saved as
+asset files. The GUI reports when no files were downloaded.
+
+Animation files are saved as Roblox data (`.rbxm` for binary, `.rbxmx` for XML),
+without converting them to FBX or video.
+
+The desktop client remembers your cookie and fills it in on the next launch.
+Use **Save** beside the cookie field to save immediately; clicking **Download**
+or closing the window normally also saves it. **Clear** removes the saved cookie
+and empties the field. The cookie remains masked and is never written to the log.
+
+On Windows the saved cookie is encrypted with current-user Windows DPAPI in
+`%LOCALAPPDATA%/RobloxAssetDownloader/cookie.dat`. Its location is independent of
+the download folder and executable. On macOS/Linux the client stores it in the
+user's application configuration directory with owner-only file permissions.
+The desktop client uses this saved cookie or the field's current value, and does
+not fall back to `runtime/roblox_cookie.txt` after clearing the field. The Python
+API still supports that legacy file by default (`load_cookie_file=False` disables
+it explicitly).
 
 Build a Windows or macOS executable on the matching platform:
 
@@ -100,6 +130,7 @@ downloader = AsyncRobloxDownloader(
     template="./runtime/template.png",
     runtime_dir="./runtime/",
     max_concurrent=10,
+    place_id=None,  # Optional positive numeric Place ID, as a string or integer
 )
 
 async def main():
@@ -167,6 +198,15 @@ account is allowed to access; it does not bypass Roblox permissions.
 * File extensions are inferred from content signatures, content type headers,
   and asset metadata.
 * Template overlay is only applied to images.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests use simulated HTTP responses and temporary files; they do not contact Roblox
+or require a real cookie.
 
 ---
 
